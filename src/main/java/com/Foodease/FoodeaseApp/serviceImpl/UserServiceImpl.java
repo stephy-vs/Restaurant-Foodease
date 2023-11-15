@@ -1,18 +1,27 @@
 package com.Foodease.FoodeaseApp.serviceImpl;
 
+//import com.Foodease.FoodeaseApp.JWT.CustomerUserDetailsService;
+import com.Foodease.FoodeaseApp.JWT.CustomerUserDetailsService;
+import com.Foodease.FoodeaseApp.JWT.JwtFilter;
+import com.Foodease.FoodeaseApp.JWT.JwtUtil;
 import com.Foodease.FoodeaseApp.POJO.User;
 import com.Foodease.FoodeaseApp.constant.RestaurantConstants;
 import com.Foodease.FoodeaseApp.dao.UserDao;
 import com.Foodease.FoodeaseApp.service.UserService;
 import com.Foodease.FoodeaseApp.utils.RestaurantUtils;
+import com.Foodease.FoodeaseApp.wrapper.UserWrapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.crypto.factory.PasswordEncoderFactories;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 
 @Slf4j
 @Service
@@ -20,6 +29,18 @@ public class UserServiceImpl implements UserService {
 
     @Autowired
     UserDao userDao;
+    @Autowired
+    AuthenticationManager authenticationManager;
+    @Autowired
+    CustomerUserDetailsService customerUserDetailsService;
+    @Autowired
+    JwtUtil jwtUtil;
+
+    @Autowired
+    JwtFilter jwtFilter;
+
+
+
     @Override
     public ResponseEntity<String> signUp(Map<String, String> requestMap) {
         log.info("Inside signup{}",requestMap);
@@ -47,6 +68,8 @@ public class UserServiceImpl implements UserService {
 
     }
 
+
+
     private boolean validateSignUpMap(Map<String, String> requestMap){
       if (requestMap.containsKey("name") && requestMap.containsKey("contactNumber")
               && requestMap.containsKey("email")&& requestMap.containsKey("password")) {
@@ -63,7 +86,73 @@ public class UserServiceImpl implements UserService {
         user.setEmail(requestMap.get("email"));
         user.setPassword(requestMap.get("password"));
         user.setStatus("false");
-        user.setStatus("User");
+        user.setRole("User");
         return user;
+    }
+
+    @Override
+    public ResponseEntity<String> login(Map<String, String> requestMap) {
+        log.info("Inside Login");
+        try {
+            Authentication auth = authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(requestMap.get("email"),requestMap.get("password"))
+            );
+            if (auth.isAuthenticated()){
+                if (customerUserDetailsService.getUserDetail().getStatus().equalsIgnoreCase("true")){
+                    return new ResponseEntity<String>("{\"token\":\""+
+                jwtUtil.generateToken(customerUserDetailsService.getUserDetail().getEmail(),
+                        customerUserDetailsService.getUserDetail().getRole()) + "\"}",HttpStatus.OK);
+                }else {
+                    return new ResponseEntity<String>("{\"message\":\""+"Wait for admin approval."+"\"}",HttpStatus.BAD_REQUEST);
+                }
+            }
+//            else {
+//                return new ResponseEntity<String>("{\"message\":\""+"Unexpected user format."+"\"}",HttpStatus.INTERNAL_SERVER_ERROR);
+//            }
+
+        }catch (Exception e){
+            log.error("{}",e);
+        }
+        return new ResponseEntity<String>("{\"message\":\""+"Authentication failed! ."+"\"}",HttpStatus.BAD_REQUEST);
+
+    }
+
+    @Override
+    public ResponseEntity<List<UserWrapper>> getAllUser() {
+        try {
+            if (jwtFilter.isAdmin()){
+                return new ResponseEntity<>(userDao.getAllUser(),HttpStatus.OK);
+
+            }else {
+                return new ResponseEntity<>(new ArrayList<>(),HttpStatus.UNAUTHORIZED);
+            }
+
+        }catch (Exception e){
+            e.printStackTrace();
+        }
+        return new  ResponseEntity<>(new ArrayList<>(), HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+
+    @Override
+    public ResponseEntity<String> update(Map<String, String> requestMap) {
+        try{
+            if (jwtFilter.isAdmin()){
+                Optional<User> optional= userDao.findById(Integer.parseInt(requestMap.get("id")));
+                if (!optional.isEmpty()){
+                    userDao.updateStatus(requestMap.get("status"),Integer.parseInt(requestMap.get("id")));
+                    return RestaurantUtils.getResponseEntity("User Updated Successfully",HttpStatus.OK);
+
+                }else {
+                    return RestaurantUtils.getResponseEntity("User id does not exist",HttpStatus.OK);
+                }
+
+            }else {
+                return RestaurantUtils.getResponseEntity(RestaurantConstants.Unauthorized_Access,HttpStatus.UNAUTHORIZED);
+            }
+
+        }catch (Exception e){
+            e.printStackTrace();
+        }
+        return RestaurantUtils.getResponseEntity(RestaurantConstants.Something_Went_Wrong,HttpStatus.INTERNAL_SERVER_ERROR);
     }
 }
